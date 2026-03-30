@@ -33,6 +33,7 @@
 #endif
 #endif
 
+// workaround for A12-5.10 kernel
 #if defined(CONFIG_STACKPROTECTOR) &&                                                                                  \
       (defined(CONFIG_ARM64) && defined(MODULE) && !defined(CONFIG_STACKPROTECTOR_PER_TASK))
 #include <linux/stackprotector.h>
@@ -43,7 +44,6 @@ __attribute__((no_stack_protector)) void ksu_setup_stack_chk_guard()
 {
       unsigned long canary;
 
-      /* Try to get a semi random initial value. */
       get_random_bytes(&canary, sizeof(canary));
       canary ^= LINUX_VERSION_CODE;
       canary &= CANARY_MASK;
@@ -62,6 +62,7 @@ __attribute__((naked)) int __init kernelsu_init_early(void)
 #define NEED_OWN_STACKPROTECTOR 0
 #endif
 
+/* 全局变量定义，修复 undeclared identifier 错误 */
 struct cred *ksu_cred;
 bool ksu_late_loaded;
 
@@ -77,13 +78,7 @@ int __init kernelsu_init(void)
 #if defined(__x86_64__)
       if (!boot_cpu_has(X86_FEATURE_INDIRECT_SAFE)) {
             pr_alert("*************************************************************");
-            pr_alert("** NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE    **");
-            pr_alert("** **");
             pr_alert("** X86_FEATURE_INDIRECT_SAFE is not enabled!        **");
-            pr_alert("** KernelSU will abort initialization to prevent      **");
-            pr_alert("** kernel panic.                       **");
-            pr_alert("** **");
-            pr_alert("** NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE    **");
             pr_alert("*************************************************************");
             return -ENOSYS;
       }
@@ -94,19 +89,6 @@ int __init kernelsu_init(void)
 #else
       ksu_late_loaded = false;
 #endif
-
-#ifdef CONFIG_KSU_DEBUG
-      pr_alert("*************************************************************");
-      pr_alert("** NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE    **");
-      pr_alert("** **");
-      pr_alert("** You are running KernelSU in DEBUG mode          **");
-      pr_alert("** **");
-      pr_alert("** NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE    **");
-      pr_alert("*************************************************************");
-#endif
-      if (allow_shell) {
-            pr_alert("shell is allowed at init!");
-      }
 
       ksu_cred = prepare_creds();
       if (!ksu_cred) {
@@ -119,8 +101,6 @@ int __init kernelsu_init(void)
       ksu_supercalls_init();
 
       if (ksu_late_loaded) {
-            pr_info("late load mode, skipping kprobe hooks\n");
-
             apply_kernelsu_rules();
             cache_sid();
             setup_ksu_cred();
@@ -137,7 +117,6 @@ int __init kernelsu_init(void)
             track_throne(false);
 
             if (!getenforce()) {
-                  pr_info("Permissive SELinux, enforcing\n");
                   setenforce(true);
             }
 
@@ -154,7 +133,10 @@ int __init kernelsu_init(void)
       kobject_del(&THIS_MODULE->mkobj.kobj);
 #endif
 #endif
+
+      /* 手动补齐 SUSFS 初始化 */
       susfs_init();
+
       return 0;
 }
 
@@ -187,11 +169,3 @@ module_init(kernelsu_init);
 module_exit(kernelsu_exit);
 
 MODULE_LICENSE("GPL");
-MODULE_AUTHOR("weishu");
-MODULE_DESCRIPTION("Android KernelSU");
-
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 13, 0)
-MODULE_IMPORT_NS("VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver");
-#else
-MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);
-#endif
