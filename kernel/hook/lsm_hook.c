@@ -6,14 +6,17 @@
 #include <linux/mutex.h>
 #include <linux/rcupdate.h>
 #include <linux/string.h>
+#include <linux/susfs.h> // 新增：SUSFS 支持
 
 #include "infra/symbol_resolver.h"
 #include "hook/lsm_hook.h"
 #include "hook/patch_memory.h"
 #include "klog.h" // IWYU pragma: keep
+
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)
 #include "linux/static_call.h"
 #endif
+
 struct ksu_lsm_hook_entry {
     struct ksu_lsm_hook *hook;
 };
@@ -186,18 +189,6 @@ int ksu_lsm_hook(struct ksu_lsm_hook *hook)
         pr_err("lsm_hook: failed to resolve target for %s\n", hook->head_name ?: "unknown");
         ret = -ENOENT;
         goto out_unlock;
-    }
-    if (!target && ksu_lsm_hook_is_bpf_target(hook)) {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)
-        pr_info("lsm_hook: %s symbol missing for %s, registration will be rejected\n", target_name,
-                hook->head_name ?: "unknown");
-#elif IS_ENABLED(CONFIG_BPF_LSM)
-        pr_info("lsm_hook: %s symbol missing for %s, registration will be rejected\n", target_name,
-                hook->head_name ?: "unknown");
-#else
-        pr_info("lsm_hook: %s symbol missing for %s, best-effort fallback is enabled\n", target_name,
-                hook->head_name ?: "unknown");
-#endif
     }
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)
