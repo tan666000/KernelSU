@@ -11,6 +11,7 @@
 #include <linux/version.h>
 #include <linux/sched/task_stack.h>
 #include <linux/ptrace.h>
+#include <linux/susfs.h> // 新增：SUSFS 支持
 
 #include "arch.h"
 #include "policy/allowlist.h"
@@ -50,30 +51,30 @@ static const struct ksu_feature_handler su_compat_handler = {
 
 static void __user *userspace_stack_buffer(const void *d, size_t len)
 {
-    // To avoid having to mmap a page in userspace, just write below the stack
-    // pointer.
     char __user *p = (void __user *)current_user_stack_pointer() - len;
-
     return copy_to_user(p, d, len) ? NULL : p;
 }
 
 static char __user *sh_user_path(void)
 {
     static const char sh_path[] = "/system/bin/sh";
-
     return userspace_stack_buffer(sh_path, sizeof(sh_path));
 }
 
 static char __user *ksud_user_path(void)
 {
     static const char ksud_path[] = KSUD_PATH;
-
     return userspace_stack_buffer(ksud_path, sizeof(ksud_path));
 }
 
 int ksu_handle_faccessat(int *dfd, const char __user **filename_user, int *mode, int *__unused_flags)
 {
     const char su[] = SU_PATH;
+
+    // 新增：如果进程处于 SUSFS 状态，直接返回 ENOENT
+    if (susfs_is_current_is_sus_status()) {
+        return 0;
+    }
 
     if (!ksu_is_allow_uid_for_current(current_uid().val)) {
         return 0;
@@ -93,8 +94,12 @@ int ksu_handle_faccessat(int *dfd, const char __user **filename_user, int *mode,
 
 int ksu_handle_stat(int *dfd, const char __user **filename_user, int *flags)
 {
-    // const char sh[] = SH_PATH;
     const char su[] = SU_PATH;
+
+    // 新增：如果进程处于 SUSFS 状态，隐藏 su 路径
+    if (susfs_is_current_is_sus_status()) {
+        return 0;
+    }
 
     if (!ksu_is_allow_uid_for_current(current_uid().val)) {
         return 0;
@@ -125,6 +130,11 @@ long ksu_handle_execve_sucompat(const char __user **filename_user, int orig_nr, 
     char path[sizeof(su) + 1];
     long ret;
     unsigned long addr;
+
+    // 新增：如果进程处于 SUSFS 状态，禁止通过 sucompat 执行
+    if (susfs_is_current_is_sus_status()) {
+        goto do_orig_execve;
+    }
 
     if (unlikely(!filename_user))
         goto do_orig_execve;
@@ -171,7 +181,6 @@ do_orig_execve:
     return ksu_syscall_table[orig_nr](regs);
 }
 
-// sucompat: permitted process can execute 'su' to gain root access.
 void ksu_sucompat_init()
 {
     if (ksu_register_feature_handler(&su_compat_handler)) {
